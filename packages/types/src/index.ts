@@ -1,3 +1,6 @@
+// Analytics Types
+export type { TripAnalyticsSnapshot } from './analytics';
+
 // User & Auth Types
 export type UserRole = 'USER' | 'ADMIN';
 

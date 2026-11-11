@@ -1035,6 +1035,29 @@ class RallyGroupService implements GroupService {
     return this.apiTrip?.id ?? null;
   }
 
+  /**
+   * Fetch trip-level analytics from `GET /api/v1/trips/{trip_id}/analytics`.
+   *
+   * This is the primary method the trip summary page should call instead of
+   * falling back to `getLatestTripSummary` mock data. The real endpoint
+   * returns a `TripAnalytics` response for both live and completed trips —
+   * for COMPLETED trips with a snapshot it serves the immutable snapshot
+   * directly; for everything else it computes fresh from source tables.
+   *
+   * @param tripId  UUID of the trip to fetch analytics for.
+   * @param token   Supabase JWT access token (caller obtains via
+   *                `getCurrentAccessToken()` or `supabase.auth.getSession()`).
+   *                Passed explicitly so the page can gate the call until auth
+   *                is confirmed ready, avoiding 401s on mount.
+   * @returns       The `TripAnalytics` payload (see lib/api/types.ts).
+   *
+   * @throws        Re-throws `ApiError` on non-2xx responses so callers can
+   *                distinguish 401/403/404 from unexpected network errors.
+   */
+  async getTripAnalytics(tripId: string, token: string): Promise<import('@/lib/api/types').TripAnalytics> {
+    return analyticsApi.getTripAnalytics(tripId);
+  }
+
   getConnectionStatus(): ConnectionStatus {
     return this.connectionStatus;
   }

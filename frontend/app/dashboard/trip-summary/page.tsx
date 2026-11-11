@@ -6,7 +6,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { Route, Clock, Users, BellRing, Navigation2, UsersRound, Octagon, Siren, CheckCircle2, Loader2 } from 'lucide-react';
 import RiskRing from '@/components/dashboard/RiskRing';
 import RouteReplayMap from '@/components/map/RouteReplayMap';
-import { getLatestTripSummary, getTripSummaryById } from '@/lib/mock/tripHistoryService';
+import { getLatestTripSummary } from '@/lib/mock/tripHistoryService';
 import * as tripsApi from '@/lib/api/trips';
 import * as analyticsApi from '@/lib/api/analytics';
 import * as routesApi from '@/lib/api/routes';
@@ -21,12 +21,11 @@ function TripSummaryContent() {
   useEffect(() => {
     let cancelled = false;
     async function loadSummary() {
-      const local = id ? getTripSummaryById(id) : getLatestTripSummary();
-      if (local) {
-        setSummary(local);
-        setLoading(false);
-        return;
-      }
+      // ── Path A: specific trip id in URL → always fetch from the real backend.
+      // The mock/localStorage path is intentionally bypassed here: a trip id
+      // means the user came from an end-trip flow or a history link, and we
+      // want the authoritative data from `GET /api/v1/trips/{id}/analytics`
+      // rather than a possibly-stale local snapshot.
       if (id) {
         try {
           const [apiTrip, analytics, insights, routeData] = await Promise.all([
@@ -74,9 +73,18 @@ function TripSummaryContent() {
         } catch (err) {
           console.warn('Could not fetch trip summary from backend:', err);
         }
+        if (!cancelled) {
+          setSummary(null);
+          setLoading(false);
+        }
+        return;
       }
+
+      // ── Path B: no id in URL → fall back to the most recent local history
+      // entry (written by RallyGroupService.endTrip via saveTripSummary).
+      const local = getLatestTripSummary();
       if (!cancelled) {
-        setSummary(null);
+        setSummary(local ?? null);
         setLoading(false);
       }
     }

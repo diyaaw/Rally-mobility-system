@@ -70,6 +70,27 @@ def intel_eval_lock_key(trip_id) -> str:
     return f"trip:{trip_id}:intel:lock"
 
 
+def intel_worker_leader_key() -> str:
+    """Distributed leader-election lock for the intelligence evaluation loop.
+
+    At most one Uvicorn worker process holds this key at a time; all other
+    workers skip their evaluation tick rather than duplicating work.
+
+    Key properties:
+    - Value: str(os.getpid()) of the holding process — visible in Redis CLI
+      for debugging, never relied on for correctness.
+    - TTL: set to INTELLIGENCE_EVALUATION_INTERVAL_SECONDS * 3 on every tick
+      the leader successfully starts. A crashed/frozen leader releases within
+      ~3 intervals; a clean shutdown deletes the key immediately (see
+      run_intelligence_worker's finally block).
+    - Failure mode: if Redis is unavailable, every worker falls through and
+      runs the tick independently — fail-open, not fail-silent, matching the
+      rest of this codebase's Redis-down behaviour (see engine.py, which
+      still runs per-trip evaluation when it can't acquire intel_eval_lock).
+    """
+    return "intel:worker_leader"
+
+
 # --- Alerts (app/alerts/) --------------------------------------------------
 
 

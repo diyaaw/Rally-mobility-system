@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -84,3 +84,70 @@ async def test_evaluation_tick_continues_after_one_trip_fails(fake_redis):
     # trip_a failed but trip_b still got evaluated — one bad trip must
     # never take down the whole tick.
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# Distributed leader-lock tests
+# ---------------------------------------------------------------------------
+
+async def test_leader_lock_acquired_when_key_absent(fake_redis):
+    """A worker with no existing lock in Redis becomes the leader."""
+    pid = worker._WORKER_PID
+    result = await worker._try_acquire_or_renew_leader_lock(fake_redis, ttl_ms=30_000)
+    assert result is True
+    # Verify the key was written with our PID as the value.
+    stored = await fake_redis.get("intel:worker_leader")
+    assert stored == pid
+
+
+async def test_non_leader_skips_when_lock_held_by_other_pid(fake_redis):
+    """A worker with a different PID in the lock value is told to skip."""
+    from app.core.redis_keys import intel_worker_leader_key
+    other_pid = str(int(worker._WORKER_PID) + 9999)
+    await fake_redis.set(intel_worker_leader_key(), other_pid, px=30_000)
+
+    result = await worker._try_acquire_or_renew_leader_lock(fake_redis, ttl_ms=30_000)
+    assert result is False
+
+
+async def test_leader_renews_its_own_lock(fake_redis):
+    """The same process can renew the lock it already holds."""
+    from app.core.redis_keys import intel_worker_leader_key
+    pid = worker._WORKER_PID
+    # Simulate a lock this process already holds with a short TTL.
+    await fake_redis.set(intel_worker_leader_key(), pid, px=2_000)
+
+    result = await worker._try_acquire_or_renew_leader_lock(fake_redis, ttl_ms=30_000)
+    assert result is True
+    # TTL should have been refreshed (fakeredis exposes pttl).
+    remaining_ms = await fake_redis.pttl(intel_worker_leader_key())
+    assert remaining_ms > 2_000  # renewed to 30s, not still at <= 2s
+
+
+async def test_leader_lock_fails_open_on_redis_error():
+    """If Redis raises, the helper returns True so no tick is silently lost."""
+    broken_redis = AsyncMock()
+    broken_redis.set.side_effect = Exception("connection refused")
+
+    result = await worker._try_acquire_or_renew_leader_lock(broken_redis, ttl_ms=30_000)
+    assert result is True
+
+
+async def test_release_leader_lock_removes_key_for_current_pid(fake_redis):
+    """Clean shutdown deletes the key when this process holds it."""
+    from app.core.redis_keys import intel_worker_leader_key
+    pid = worker._WORKER_PID
+    await fake_redis.set(intel_worker_leader_key(), pid, px=30_000)
+
+    await worker._release_leader_lock(fake_redis)
+    assert await fake_redis.get(intel_worker_leader_key()) is None
+
+
+async def test_release_leader_lock_leaves_key_held_by_other_pid(fake_redis):
+    """Shutdown must NOT delete a lock held by a different process."""
+    from app.core.redis_keys import intel_worker_leader_key
+    other_pid = str(int(worker._WORKER_PID) + 1)
+    await fake_redis.set(intel_worker_leader_key(), other_pid, px=30_000)
+
+    await worker._release_leader_lock(fake_redis)
+    assert await fake_redis.get(intel_worker_leader_key()) == other_pid

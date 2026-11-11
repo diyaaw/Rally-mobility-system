@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { LocationData, LocationQuality } from '../types/location';
+import type { LocationCreate } from '@/lib/api/types';
+import { api } from '@/lib/api/client';
 import { rallyGroupServiceLocation } from '@/lib/realtime/RallyGroupService';
+import {
+  enqueueLocation,
+  getQueuedLocations,
+  clearQueuedLocations,
+} from '@/lib/offlineStore';
 
 export function useLocation(autoStart: boolean = true) {
   const [location, setLocation] = useState<LocationData | null>(null);
@@ -9,6 +16,71 @@ export function useLocation(autoStart: boolean = true) {
   const [permissionState, setPermissionState] = useState<PermissionState | 'unsupported' | 'unknown'>('unknown');
   const watchIdRef = useRef<number | null>(null);
   const isTrackingRef = useRef(false);
+  const isFlushingRef = useRef(false);
+
+  // Online synchronization: flush queued locations when network returns
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const flushQueuedLocations = async () => {
+      if (isFlushingRef.current) return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+      isFlushingRef.current = true;
+      try {
+        const queued = await getQueuedLocations();
+        if (!queued || queued.length === 0) return;
+
+        const tripId = rallyGroupServiceLocation.getTripId();
+        const batchEndpoint = tripId ? `/trips/${tripId}/locations/batch` : '/locations/batch';
+        const singleEndpoint = tripId ? `/trips/${tripId}/locations` : '/locations';
+
+        let success = false;
+        try {
+          // Attempt batch ingestion endpoint first
+          await api.post(batchEndpoint, { locations: queued });
+          success = true;
+        } catch {
+          // Fall back to sequential retry
+          try {
+            for (const item of queued) {
+              const payload: LocationCreate = {
+                latitude: item.latitude,
+                longitude: item.longitude,
+                accuracy: item.accuracy ?? null,
+                speed: item.speed ?? null,
+                heading: item.heading ?? null,
+                recorded_at: item.recorded_at ?? null,
+              };
+              await api.post(singleEndpoint, payload);
+            }
+            success = true;
+          } catch (err) {
+            console.warn('[useLocation] Sequential flush of queued locations failed:', err);
+          }
+        }
+
+        if (success) {
+          await clearQueuedLocations();
+        }
+      } catch (err) {
+        console.warn('[useLocation] Failed to flush queued locations on reconnect:', err);
+      } finally {
+        isFlushingRef.current = false;
+      }
+    };
+
+    window.addEventListener('online', flushQueuedLocations);
+
+    // If online on mount, attempt to flush any lingering buffered points
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      void flushQueuedLocations();
+    }
+
+    return () => {
+      window.removeEventListener('online', flushQueuedLocations);
+    };
+  }, []);
 
   // Check initial permissions if supported
   useEffect(() => {
@@ -93,6 +165,34 @@ export function useLocation(autoStart: boolean = true) {
         } catch {
           // Socket might be disconnected or not initialized yet; handled gracefully
         }
+
+        // Send location ping to backend REST ingestion with offline IndexedDB fallback
+        const locationPayload: LocationCreate = {
+          latitude,
+          longitude,
+          accuracy: accuracy ?? null,
+          speed: speed ?? null,
+          heading: heading ?? null,
+          recorded_at: new Date(position.timestamp).toISOString(),
+        };
+
+        const sendOrQueueLocation = async () => {
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            await enqueueLocation(locationPayload);
+            return;
+          }
+
+          try {
+            const tripId = rallyGroupServiceLocation.getTripId();
+            const endpoint = tripId ? `/trips/${tripId}/locations` : '/locations';
+            await api.post(endpoint, locationPayload);
+          } catch {
+            // Network failure or offline -> enqueue ping into IndexedDB
+            await enqueueLocation(locationPayload);
+          }
+        };
+
+        void sendOrQueueLocation();
       },
       (err) => {
         isTrackingRef.current = false;
