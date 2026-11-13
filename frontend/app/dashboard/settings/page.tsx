@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { updateMe } from '@/lib/api/auth';
 import { playChime } from '@/lib/audio/alertSound';
 import { createPortal } from 'react-dom';
+import RequireAuth from '@/components/dashboard/RequireAuth';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -96,7 +97,8 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background relative pb-8">
+    <RequireAuth>
+      <div className="min-h-screen flex flex-col bg-background relative pb-8">
       <Topbar group={group} />
 
       <div className="flex-1 p-4 md:p-6 lg:p-8 space-y-8 max-w-2xl mx-auto w-full">
@@ -526,5 +528,6 @@ export default function SettingsPage() {
         document.body
       )}
     </div>
+    </RequireAuth>
   );
 }

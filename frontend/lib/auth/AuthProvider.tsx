@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
+import { settingsService } from '@/lib/mock/settingsService';
 
 /** Discriminated outcome for signUpWithPassword so the UI can react
  * precisely to each scenario without guessing. */
@@ -38,6 +39,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!active) return;
       setSession(data.session);
       setLoading(false);
+      if (data.session) {
+        settingsService.syncWithBackend().catch(() => {});
+      }
     });
 
     // Fires on sign-in, sign-out, AND every automatic token refresh — the
@@ -48,6 +52,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!active) return;
       setSession(newSession);
       setLoading(false);
+      if (newSession) {
+        settingsService.syncWithBackend().catch(() => {});
+      }
     });
 
     return () => {
@@ -65,7 +72,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // land on a protected page before the listener ever fires, and
     // RequireAuth bounces them straight back to /login having seen a
     // stale null session.
-    if (!error) setSession(data.session);
+    if (!error) {
+      setSession(data.session);
+      settingsService.syncWithBackend().catch(() => {});
+    }
     return { error: error?.message ?? null };
   }, []);
 

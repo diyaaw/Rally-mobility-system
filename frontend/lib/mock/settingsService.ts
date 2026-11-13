@@ -1,5 +1,6 @@
 import type { Settings } from './types';
 import * as settingsApi from '@/lib/api/settings';
+import { supabase } from '@/lib/supabase/client';
 
 const STORAGE_KEY = 'rally:settings';
 
@@ -32,12 +33,10 @@ class SettingsService {
   private settings: Settings;
   private listeners = new Set<(settings: Settings) => void>();
   private syncAttempted = false;
+  private syncInFlight: Promise<Settings> | null = null;
 
   constructor() {
     this.settings = this.read();
-    if (typeof window !== 'undefined') {
-      setTimeout(() => this.syncWithBackend(), 100);
-    }
   }
 
   private read(): Settings {
@@ -57,41 +56,60 @@ class SettingsService {
   }
 
   async syncWithBackend(): Promise<Settings> {
-    try {
-      const remote = await settingsApi.getSettings();
-      if (remote) {
-        this.settings = {
-          ...this.settings,
-          notifications: {
-            ...this.settings.notifications,
-            alerts: remote.notifications_alerts,
-            sos: remote.notifications_sos,
-            connectivity: remote.notifications_connectivity,
-            tripSummaries: remote.notifications_trip_summaries,
-            soundAlerts: remote.sound_alerts_enabled,
-          },
-          safety: {
-            alertSensitivity: (remote.alert_sensitivity?.toLowerCase() as 'low' | 'medium' | 'high') || 'medium',
-            separationThresholdM: remote.separation_threshold_m ?? 150,
-            routeDeviationThresholdM: remote.route_deviation_threshold_m ?? 100,
-          },
-          appearance: {
-            theme: remote.theme || 'dark',
-            units: remote.units || 'Metric',
-          },
-          location: {
-            ...this.settings.location,
-            sharing: remote.location_sharing ?? true,
-          },
-        };
-        this.persist();
-        this.listeners.forEach((l) => l(this.settings));
-      }
-    } catch {
-      // Backend not reached or unauthenticated — keep cached settings
+    if (typeof window === 'undefined') return this.settings;
+
+    // Return in-flight promise to avoid duplicate concurrent syncs
+    if (this.syncInFlight) {
+      return this.syncInFlight;
     }
-    this.syncAttempted = true;
-    return this.settings;
+
+    this.syncInFlight = (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!data?.session) {
+          // Unauthenticated: do not hit the backend or trigger 401 redirects
+          return this.settings;
+        }
+
+        const remote = await settingsApi.getSettings();
+        if (remote) {
+          this.settings = {
+            ...this.settings,
+            notifications: {
+              ...this.settings.notifications,
+              alerts: remote.notifications_alerts,
+              sos: remote.notifications_sos,
+              connectivity: remote.notifications_connectivity,
+              tripSummaries: remote.notifications_trip_summaries,
+              soundAlerts: remote.sound_alerts_enabled,
+            },
+            safety: {
+              alertSensitivity: (remote.alert_sensitivity?.toLowerCase() as 'low' | 'medium' | 'high') || 'medium',
+              separationThresholdM: remote.separation_threshold_m ?? 150,
+              routeDeviationThresholdM: remote.route_deviation_threshold_m ?? 100,
+            },
+            appearance: {
+              theme: remote.theme || 'dark',
+              units: remote.units || 'Metric',
+            },
+            location: {
+              ...this.settings.location,
+              sharing: remote.location_sharing ?? true,
+            },
+          };
+          this.persist();
+          this.listeners.forEach((l) => l(this.settings));
+        }
+      } catch {
+        // Backend not reached or request failed — keep cached settings
+      } finally {
+        this.syncAttempted = true;
+        this.syncInFlight = null;
+      }
+      return this.settings;
+    })();
+
+    return this.syncInFlight;
   }
 
   get(): Settings {
@@ -159,8 +177,11 @@ class SettingsService {
     }
 
     if (Object.keys(backendPatch).length > 0) {
-      settingsApi.updateSettings(backendPatch).catch((err) => {
-        console.warn('Could not persist settings to backend:', err);
+      supabase.auth.getSession().then(({ data }) => {
+        if (!data?.session) return;
+        settingsApi.updateSettings(backendPatch).catch((err) => {
+          console.warn('Could not persist settings to backend:', err);
+        });
       });
     }
 

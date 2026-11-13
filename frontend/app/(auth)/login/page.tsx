@@ -47,7 +47,21 @@ export default function LoginPage() {
       setError(signInError);
       setLoading(false);
     } else {
-      router.push('/dashboard');
+      let destination = '/dashboard';
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const redirectParam = params.get('redirect');
+        if (
+          redirectParam &&
+          redirectParam.startsWith('/') &&
+          !redirectParam.startsWith('//') &&
+          !redirectParam.startsWith('/login') &&
+          !redirectParam.startsWith('/register')
+        ) {
+          destination = redirectParam;
+        }
+      }
+      router.push(destination);
     }
   };
 

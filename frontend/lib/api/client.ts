@@ -62,9 +62,37 @@ let redirectingToLogin = false;
 
 function redirectToLogin() {
   if (typeof window === 'undefined' || redirectingToLogin) return;
+
+  const currentPath = window.location.pathname;
+  // Never redirect if already on login or register page
+  if (
+    currentPath === '/login' ||
+    currentPath.startsWith('/login/') ||
+    currentPath === '/register' ||
+    currentPath.startsWith('/register/')
+  ) {
+    return;
+  }
+
   redirectingToLogin = true;
-  const next = window.location.pathname + window.location.search;
-  window.location.href = `/login?redirect=${encodeURIComponent(next)}`;
+
+  // Determine clean, non-nested return destination
+  let next = '';
+  const searchParams = new URLSearchParams(window.location.search);
+  const existingRedirect = searchParams.get('redirect');
+
+  if (existingRedirect && !existingRedirect.startsWith('/login') && !existingRedirect.startsWith('/register')) {
+    next = existingRedirect;
+  } else if (!currentPath.startsWith('/login') && !currentPath.startsWith('/register')) {
+    next = currentPath + (window.location.search || '');
+  }
+
+  // Prevent nested or repeatedly encoded redirect parameters
+  if (next && next !== '/' && !next.startsWith('/login') && !next.startsWith('/register')) {
+    window.location.href = `/login?redirect=${encodeURIComponent(next)}`;
+  } else {
+    window.location.href = '/login';
+  }
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
