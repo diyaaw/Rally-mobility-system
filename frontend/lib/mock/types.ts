@@ -1,4 +1,4 @@
-export type SafetyStatus = 'safe' | 'warning' | 'critical' | 'offline';
+export type SafetyStatus = 'safe' | 'warning' | 'critical' | 'offline' | 'stale';
 
 export interface Member {
   id: string;

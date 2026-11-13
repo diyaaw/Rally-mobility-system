@@ -71,7 +71,7 @@ function useDeviceLocation() {
     const watchId = navigator.geolocation.watchPosition(
       (p) => setLoc({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => {},
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);

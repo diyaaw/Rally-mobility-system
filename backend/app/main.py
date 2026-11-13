@@ -82,17 +82,6 @@ app.add_middleware(
 )
 app.add_middleware(RequestIDMiddleware)
 
-# Security / observability middleware (order matters — added last runs first
-# for ASGI middleware, which is the opposite of what you'd expect from a stack).
-# Desired execution order (outer → inner): Security → RequestID → MaxBody → Route
-from app.core.middleware import MaxBodySizeMiddleware, RequestIDMiddleware, SecurityHeadersMiddleware
-from app.core.rate_limit import GeneralRateLimitMiddleware
-
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(GeneralRateLimitMiddleware)
-app.add_middleware(RequestIDMiddleware)
-app.add_middleware(MaxBodySizeMiddleware)
-
 register_exception_handlers(app)
 
 # ---- Core routes (always mounted) ----

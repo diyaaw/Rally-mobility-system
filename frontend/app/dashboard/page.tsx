@@ -10,12 +10,15 @@ import LocationStatus from '@/components/dashboard/LocationStatus';
 import MemberList from '@/components/dashboard/MemberList';
 import GroupHealthCard from '@/components/dashboard/GroupHealthCard';
 import LiveMap from '@/components/map/LiveMap';
+import SOSBanner from '@/components/dashboard/SOSBanner';
 import { ShieldCheck, AlertTriangle } from 'lucide-react';
 
 export default function DashboardPage() {
   const { group, loading, service } = useGroup();
   const [tripStarted, setTripStarted] = useState(false);
   const { isTracking } = useLocation();
+
+  const currentMember = group?.members.find((m) => m.isCurrentUser);
 
   useEffect(() => {
     // If the trip is already active on the backend, show the live map immediately
@@ -58,6 +61,17 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen flex flex-col">
         <Topbar group={group} gpsState={isTracking ? 'active' : 'off'} />
+        {group.activeSOS && group.activeSOS.length > 0 && (
+          <div className="p-4 md:px-8 pb-0">
+            <SOSBanner
+              activeSOS={group.activeSOS}
+              currentUserId={currentMember?.id ?? ''}
+              onAcknowledge={(id) => (service as any).acknowledgeSOS?.(id)}
+              onResolve={(id) => (service as any).resolveSOS?.(id)}
+              onCancel={(id) => (service as any).cancelSOS?.(id)}
+            />
+          </div>
+        )}
         <div className="flex-1 p-4 md:p-6 lg:p-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 max-w-7xl mx-auto">
             <RallyOverview group={group} onStartTrip={handleStartTrip} />
@@ -76,6 +90,17 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen flex flex-col h-screen overflow-hidden">
       <Topbar group={group} gpsState={isTracking ? 'active' : 'off'} />
+      {group.activeSOS && group.activeSOS.length > 0 && (
+        <div className="p-4 md:px-6 pb-0">
+          <SOSBanner
+            activeSOS={group.activeSOS}
+            currentUserId={currentMember?.id ?? ''}
+            onAcknowledge={(id) => (service as any).acknowledgeSOS?.(id)}
+            onResolve={(id) => (service as any).resolveSOS?.(id)}
+            onCancel={(id) => (service as any).cancelSOS?.(id)}
+          />
+        </div>
+      )}
       <div className="flex-1 p-4 md:p-6 flex flex-col gap-5 min-h-0 overflow-y-auto">
         <div className="relative flex-none h-[50vh] md:h-[65vh] shrink-0">
           <LiveMap group={group} />

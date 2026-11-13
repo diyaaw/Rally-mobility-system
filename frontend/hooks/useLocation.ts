@@ -195,32 +195,29 @@ export function useLocation(autoStart: boolean = true) {
         void sendOrQueueLocation();
       },
       (err) => {
-        isTrackingRef.current = false;
-        setIsTracking(false);
-        if (watchIdRef.current !== null && typeof window !== 'undefined' && 'geolocation' in navigator) {
-          navigator.geolocation.clearWatch(watchIdRef.current);
-          watchIdRef.current = null;
-        }
-
-        switch (err.code) {
-          case err.PERMISSION_DENIED:
-            setError('Location permission is required for RALLY location features. Please enable it in your browser settings.');
-            setPermissionState('denied');
-            break;
-          case err.POSITION_UNAVAILABLE:
-            setError('GPS signal unavailable. Please check your device location settings.');
-            break;
-          case err.TIMEOUT:
-            setError('Location request timed out. Trying again...');
-            break;
-          default:
-            setError('An unknown error occurred while acquiring location.');
+        if (err.code === err.PERMISSION_DENIED) {
+          isTrackingRef.current = false;
+          setIsTracking(false);
+          if (watchIdRef.current !== null && typeof window !== 'undefined' && 'geolocation' in navigator) {
+            navigator.geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
+          }
+          setError('Location permission is required for RALLY location features. Please enable it in your browser settings.');
+          setPermissionState('denied');
+        } else if (err.code === err.TIMEOUT) {
+          // Timeout is transient when stationary — do NOT stop tracking or clear watch!
+          // The watch continues listening in the background.
+          console.warn('[useLocation] GPS fix timed out momentarily, still listening...');
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          console.warn('[useLocation] GPS position momentarily unavailable, still listening...');
+        } else {
+          console.warn('[useLocation] Geolocation watch error:', err);
         }
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 15000,
+        maximumAge: 10000,
+        timeout: 20000,
       }
     );
 

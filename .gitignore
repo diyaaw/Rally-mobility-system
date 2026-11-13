@@ -45,3 +45,12 @@ next-env.d.ts
 coverage/
 .turbo/
 *.timestamp-*.mjs
+dump.rdb
+test_evidence/
+features_verification_report.json
+*.test.js
+scratch_*.js
+verify_*.js
+rally_full_test.js
+test_ws_alerts.js
+test_route_deviation.js

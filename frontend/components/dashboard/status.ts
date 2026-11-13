@@ -36,4 +36,12 @@ export const STATUS_STYLE: Record<
     border: 'border-slate-500/30',
     hex: '#94A3B8',
   },
+  stale: {
+    label: 'Stale',
+    dot: 'bg-yellow-500',
+    text: 'text-yellow-400',
+    bg: 'bg-yellow-500/10',
+    border: 'border-yellow-500/30',
+    hex: '#EAB308',
+  },
 };

@@ -107,7 +107,7 @@ def _load_active_members_sync(db: Session, group_id: uuid.UUID) -> Tuple[List[di
 
     leader_setting = None
     if leader_id:
-        leader_setting = db.scalar(select(UserSetting).where(UserSetting.user_id == leader_id))
+        leader_setting = db.scalars(select(UserSetting).where(UserSetting.user_id == leader_id)).first()
 
     return members, leader_setting
 
@@ -373,7 +373,7 @@ async def _evaluate_route(db: Session, redis: Redis, trip_id: uuid.UUID, group_i
         return
 
     thresholds = current_thresholds()
-    members = await run_in_threadpool(_load_active_members_sync, db, group_id)
+    members, _ = await run_in_threadpool(_load_active_members_sync, db, group_id)
     user_ids = [m["user_id"] for m in members]
     live_locations = await live_state_service.get_live_locations(redis, trip_id, user_ids)
     online_status = await presence_service.get_online_status(redis, trip_id, user_ids)

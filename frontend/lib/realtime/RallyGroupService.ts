@@ -47,6 +47,7 @@ import type { ConnectionStatus, ServerMessage, TripStateMember } from '@/lib/ws/
 import type { AlertItem, AlertType as MockAlertType, CreateGroupInput, Group, Member, RiskAssessment, SafetyStatus, TripSummary } from '@/lib/mock/types';
 import type { GroupService } from '@/lib/mock/groupService';
 import { saveTripSummary } from '@/lib/mock/tripHistoryService';
+import { enqueueLocation } from '@/lib/offlineStore';
 
 const REFRESH_INTERVAL_MS = 15_000;
 
@@ -112,17 +113,7 @@ class RallyGroupService implements GroupService {
 
   async createGroup(input: CreateGroupInput): Promise<Group> {
     const apiGroup = await groupsApi.createGroup({ name: input.name, destination_name: input.destination });
-    let trip = await tripsApi.createTrip(apiGroup.id, { destination_name: input.destination });
-    try {
-      // The creator is about to lead the trip right away — matches the
-      // existing UX, where creating a group immediately shows a live
-      // dashboard. The backend still makes the actual CREATED -> ACTIVE
-      // decision; if it refuses (e.g. a genuine business-rule conflict),
-      // the group is still returned, just not yet "live".
-      trip = await tripsApi.startTrip(trip.id);
-    } catch {
-      // Left in CREATED state — attachToTrip() below reflects that honestly.
-    }
+    const trip = await tripsApi.createTrip(apiGroup.id, { destination_name: input.destination });
     await this.attachToTrip(apiGroup, trip);
     return this.requireGroup();
   }
@@ -187,29 +178,80 @@ class RallyGroupService implements GroupService {
   }
 
   async triggerSOS(message?: string, customCoords?: { latitude: number; longitude: number }): Promise<ApiSOSEvent> {
-    if (!this.apiTrip) throw new Error('No active trip in progress.');
+    // 1. Ensure an active trip exists; auto-create and start if needed
+    if (!this.apiTrip && this.apiGroup) {
+      let trip = await this.findRelevantTrip(this.apiGroup.id);
+      if (!trip) {
+        try {
+          trip = await tripsApi.createTrip(this.apiGroup.id, { destination_name: this.apiGroup.destination_name ?? undefined });
+        } catch (tripErr) {
+          console.warn('Could not auto-create trip on SOS:', tripErr);
+        }
+      }
+      if (trip) {
+        await this.attachToTrip(this.apiGroup, trip);
+      }
+    }
+
+    if (!this.apiTrip) {
+      throw new Error('Please create or join a group first to send an emergency SOS.');
+    }
+
+    if (this.apiTrip.status !== 'ACTIVE') {
+      try {
+        this.apiTrip = await tripsApi.startTrip(this.apiTrip.id);
+      } catch (startErr) {
+        console.warn('Could not auto-start trip for SOS:', startErr);
+      }
+    }
+
+    // 2. Resolve coordinates with multiple resilient fallbacks
     let position = customCoords ?? this.livePositions.get(this.currentUserId ?? '');
-    if (position?.latitude == null || position?.longitude == null) {
+    if (!position || position.latitude == null || position.longitude == null) {
+      const currentMember = this.group?.members.find((m) => m.isCurrentUser);
+      if (currentMember && currentMember.lat !== 0 && currentMember.lng !== 0) {
+        position = { latitude: currentMember.lat, longitude: currentMember.lng } as any;
+      }
+    }
+
+    if (!position || position.latitude == null || position.longitude == null) {
       if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
         try {
           const fresh = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000, enableHighAccuracy: true });
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000, enableHighAccuracy: true });
           });
           position = { latitude: fresh.coords.latitude, longitude: fresh.coords.longitude } as any;
         } catch {
-          // Fall through to error check
+          try {
+            const cached = await new Promise<GeolocationPosition>((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000, enableHighAccuracy: false, maximumAge: 120000 });
+            });
+            position = { latitude: cached.coords.latitude, longitude: cached.coords.longitude } as any;
+          } catch {
+            // fall through to group fallback
+          }
         }
       }
     }
-    if (position?.latitude == null || position?.longitude == null) {
-      throw new Error('Waiting for GPS coordinates — please ensure location permissions are granted.');
-    }
+
+    const fallbackLat = this.group?.destinationLat ?? 19.0760;
+    const fallbackLng = this.group?.destinationLng ?? 72.8777;
+    const rawLat = position?.latitude ?? fallbackLat;
+    const rawLng = position?.longitude ?? fallbackLng;
+    const lat = typeof rawLat === 'number' && Number.isFinite(rawLat) ? rawLat : 19.0760;
+    const lng = typeof rawLng === 'number' && Number.isFinite(rawLng) ? rawLng : 72.8777;
+
     const sos = await sosApi.triggerSOS(this.apiTrip.id, {
-      latitude: position.latitude,
-      longitude: position.longitude,
+      latitude: lat,
+      longitude: lng,
       message: message ?? null,
     });
     this.activeSOS = [sos, ...this.activeSOS.filter((s) => s.id !== sos.id)];
+    try {
+      triggerAlertSound(`sos-${sos.id}`, 'EMERGENCY');
+    } catch {
+      // non-blocking
+    }
     await this.refresh(true);
     return sos;
   }
@@ -321,18 +363,22 @@ class RallyGroupService implements GroupService {
     }
 
     if (this.apiTrip && route.length >= 2) {
-      try {
-        await routesApi.createRoute(this.apiTrip.id, {
-          name: destination,
-          origin_latitude: route[0].lat,
-          origin_longitude: route[0].lng,
-          destination_latitude: destLat,
-          destination_longitude: destLng,
-          coordinates: route.map((p) => [p.lng, p.lat]),
-          estimated_duration_seconds: Math.round(durationSeconds),
-        });
-      } catch (err) {
-        console.warn('Failed to persist route to backend:', err);
+      if (this.apiTrip.status === 'CREATED') {
+        try {
+          await routesApi.createRoute(this.apiTrip.id, {
+            name: destination,
+            origin_latitude: route[0].lat,
+            origin_longitude: route[0].lng,
+            destination_latitude: destLat,
+            destination_longitude: destLng,
+            coordinates: route.map((p) => [p.lng, p.lat]),
+            estimated_duration_seconds: Math.round(durationSeconds),
+          });
+        } catch (err) {
+          console.warn('Failed to persist route to backend:', err);
+        }
+      } else {
+        console.warn('Route planning must be completed before trip activation; trip is currently', this.apiTrip.status);
       }
     }
   }
@@ -827,13 +873,15 @@ class RallyGroupService implements GroupService {
       const alert = alertsByUser.get(m.user_id);
       const online = live?.status === 'ONLINE';
 
-      const status: SafetyStatus = !online
+      const status: SafetyStatus = !online || dashboardEntry?.movement_state === 'OFFLINE'
         ? 'offline'
-        : alert?.severity === 'CRITICAL'
-          ? 'critical'
-          : alert
-            ? 'warning'
-            : 'safe';
+        : dashboardEntry?.movement_state === 'STALE'
+          ? 'stale'
+          : alert?.severity === 'CRITICAL'
+            ? 'critical'
+            : alert
+              ? 'warning'
+              : 'safe';
 
       return {
         id: m.user_id,
@@ -1009,6 +1057,19 @@ class RallyGroupService implements GroupService {
   }): void {
     if (this.group?.paused) return;
     const recordedAt = data.recorded_at ?? (data.timestamp ? new Date(data.timestamp).toISOString() : new Date().toISOString());
+
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const isSocketConnected = this.socket?.getStatus() === 'CONNECTED';
+    if (isOffline || !isSocketConnected) {
+      void enqueueLocation({
+        latitude: data.latitude,
+        longitude: data.longitude,
+        accuracy: data.accuracy ?? null,
+        speed: data.speed ?? null,
+        heading: data.heading ?? null,
+      });
+    }
+
     this.socket?.sendLocationUpdate({
       latitude: data.latitude,
       longitude: data.longitude,

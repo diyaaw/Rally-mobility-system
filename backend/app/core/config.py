@@ -415,7 +415,7 @@ class Settings(BaseSettings):
     FALLING_BEHIND_DURATION_SECONDS: int = 30
 
     # Group-separation detection
-    GROUP_SEPARATION_DISTANCE_METERS: float = 500.0
+    GROUP_SEPARATION_DISTANCE_METERS: float = 200.0
     GROUP_SEPARATION_DURATION_SECONDS: int = 30
 
     # Isolated-member detection
@@ -436,8 +436,8 @@ class Settings(BaseSettings):
     # Route intelligence thresholds (app/intelligence/thresholds.py, Phase 9)
     # -------------------------------------------------------------------------
     ROUTE_ENDPOINT_TOLERANCE_METERS: float = 50.0
-    OFF_ROUTE_THRESHOLD_METERS: float = 100.0
-    ROUTE_DEVIATION_DURATION_SECONDS: int = 30
+    OFF_ROUTE_THRESHOLD_METERS: float = 75.0
+    ROUTE_DEVIATION_DURATION_SECONDS: int = 20
     ARRIVAL_THRESHOLD_METERS: float = 50.0
     ARRIVAL_DURATION_SECONDS: int = 10
     ROUTE_PROGRESS_STALE_SECONDS: int = 60

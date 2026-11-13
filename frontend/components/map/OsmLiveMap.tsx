@@ -80,7 +80,7 @@ export default function OsmLiveMap({
     const watchId = navigator.geolocation.watchPosition(
       (p) => setInternalDeviceLoc({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => {},
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
@@ -390,12 +390,21 @@ export default function OsmLiveMap({
       });
     }
 
-    // 4. Group Members & Current User
-    const membersToRender = effectiveMembers.length > 0
-      ? effectiveMembers
-      : deviceLoc
-      ? [{ id: 'me', name: 'You', isCurrentUser: true, lat: deviceLoc.lat, lng: deviceLoc.lng, speedKmh: 0, status: 'safe' }]
-      : [];
+    // 4. Group Members & Current User (ensuring current user marker is never dropped)
+    const hasCurrentUser = effectiveMembers.some((m) => m.isCurrentUser);
+    const membersToRender = [...effectiveMembers];
+    if (!hasCurrentUser && deviceLoc) {
+      const currentInGroup = group?.members?.find((m) => m.isCurrentUser);
+      membersToRender.push({
+        id: currentInGroup?.id ?? 'me',
+        name: currentInGroup?.name ?? 'You',
+        isCurrentUser: true,
+        lat: deviceLoc.lat,
+        lng: deviceLoc.lng,
+        speedKmh: 0,
+        status: 'safe',
+      } as any);
+    }
 
     membersToRender.forEach((m: any) => {
       const style = STATUS_STYLE[m.status as keyof typeof STATUS_STYLE] || STATUS_STYLE.safe;

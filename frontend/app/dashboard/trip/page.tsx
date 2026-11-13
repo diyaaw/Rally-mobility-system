@@ -12,6 +12,7 @@ import SOSBanner from '@/components/dashboard/SOSBanner';
 import GroupHealthCard from '@/components/dashboard/GroupHealthCard';
 import { groupService } from '@/lib/group/groupService';
 import { useLocation } from '@/hooks/useLocation';
+import { useOfflineSync } from '@/hooks/useOfflineSync';
 import type { Group } from '@/lib/mock/types';
 import { useAuth } from '@/lib/auth/AuthProvider';
 
@@ -27,6 +28,8 @@ function TripContent({ group }: { group: Group }) {
   const router = useRouter();
   const { user } = useAuth();
   const { location, isTracking, error: locError, startTracking, stopTracking } = useLocation();
+  const tripId = (groupService as any).getTripId?.() || group.id;
+  useOfflineSync(tripId);
 
   // Auto-start GPS tracking as soon as the trip page mounts
   useEffect(() => {

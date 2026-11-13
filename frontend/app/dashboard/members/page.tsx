@@ -160,8 +160,16 @@ function MembersContent({ group }: { group: Group }) {
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
                       {member.isCurrentUser && <span className="font-medium text-foreground">You ·</span>}
-                      <span className={`w-1.5 h-1.5 rounded-full ${member.online ? 'bg-emerald-400' : 'bg-muted-foreground'}`} />
-                      <span>{member.online ? 'Online' : 'Offline'}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${
+                        member.status === 'offline' ? 'bg-slate-500' :
+                        member.status === 'stale' ? 'bg-yellow-400 animate-pulse' :
+                        'bg-emerald-400'
+                      }`} />
+                      <span>{
+                        member.status === 'offline' ? 'Offline' :
+                        member.status === 'stale' ? 'Stale' :
+                        'Online'
+                      }</span>
                     </p>
                   </div>
                 </div>
